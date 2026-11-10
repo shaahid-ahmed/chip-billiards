@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Chip Billiards — where does a TE/RB chip send the pass rusher, and does it matter?
+"""Compare pass-rusher movement around chip contact with pressure outcomes.
 
-Treat every PFF-labeled chip block (pff_blockType == 'CH') as a collision: compare the chipped rusher's
-velocity in the 0.3 s before vs after contact with the chipper, classify the deflection
-(braked = closing speed toward the QB dropped / no change / ran through it), and relate it to whether that rusher
-recorded a pressure (PFF hit, hurry or sack).
+For each PFF-labeled chip block, compare the rusher's velocity in the 0.3 s
+before and after estimated contact. Group chips by the change in closing
+speed toward the QB, then compare PFF hit, hurry, or sack rates across groups.
 
-Run:  python get_data.py && python chip_billiards.py      (outputs land in ./outputs)
+Run python get_data.py, then python chip_billiards.py. Results go in ./outputs.
 """
 import os
 import numpy as np
@@ -22,11 +21,11 @@ OUT = os.path.join(HERE, "outputs")
 os.makedirs(OUT, exist_ok=True)
 
 SKILL = ["TE", "RB", "FB", "WR"]
-WIN = 25          # search for contact within 2.5 s (25 frames) after the snap
-CONTACT_YD = 1.5  # chipper–rusher distance that counts as contact
-K = 3             # 0.3 s before/after contact for velocity
-MIN_SPEED = 1.5   # rusher must be moving (yd/s) before contact, else direction is noise
-BRAKE_T = 0.3     # yd/s change in closing speed toward the QB to call a chip effective / ineffective
+WIN = 25          # Look for contact in the first 2.5 s after the snap (10 frames/s).
+CONTACT_YD = 1.5  # Maximum chipper–rusher distance for estimated contact, in yards.
+K = 3             # Measure velocity over 0.3 s on either side of contact.
+MIN_SPEED = 1.5   # Below 1.5 yd/s, the rusher's direction is unreliable.
+BRAKE_T = 0.3     # Minimum change in closing speed (yd/s) for braked or ran through.
 SNAP_EV = {"ball_snap", "autoevent_ballsnap"}
 END_EV = {"pass_forward", "autoevent_passforward", "qb_sack", "qb_strip_sack", "run", "fumble"}
 CATS = ["Braked him", "No change", "Ran through it"]
@@ -43,7 +42,7 @@ def wilson(k, n, z=1.96):
     return c - h, c + h
 
 
-# ---------------------------------------------------------------- labels
+# Match each chip to its rusher, QB, and pressure outcome.
 pff = pd.read_csv(os.path.join(DATA, "pffScoutingData.csv"))
 players = pd.read_csv(os.path.join(DATA, "players.csv"))
 plays = pd.read_csv(os.path.join(DATA, "plays.csv"))
@@ -68,7 +67,7 @@ ch = ch[["gameId", "playId", "nflId", "chip_pos", "rusher", "qb", "rusher_pressu
          "possessionTeam", "passResult", "pff_passCoverageType"]].rename(columns={"nflId": "chipper"})
 print(f"CH chips by skill players: {len(ch)} on {ch[['gameId', 'playId']].drop_duplicates().shape[0]} plays")
 
-# baselines: all rushers, and the same chipped rushers on rushes where they were NOT chipped
+# Compare pressure rates with all rushes and with the same rushers' unchipped plays.
 rush = pff[pff.pff_role == "Pass Rush"][["gameId", "playId", "nflId", "pressure"]].copy()
 chipped_keys = set(zip(ch.gameId, ch.playId, ch.rusher))
 rush["chipped"] = [k in chipped_keys for k in zip(rush.gameId, rush.playId, rush.nflId)]
@@ -76,7 +75,7 @@ base_all = rush.pressure.mean()
 base_same_unchipped = rush[(~rush.chipped) & rush.nflId.isin(set(ch.rusher))].pressure.mean()
 base_same_chipped = rush[rush.chipped].pressure.mean()
 
-# ---------------------------------------------------------------- tracking
+# Cache tracking for the players involved so repeat runs can skip the full CSVs.
 need = pd.concat([ch[["gameId", "playId", c]].rename(columns={c: "nflId"}) for c in ("chipper", "rusher", "qb")]).drop_duplicates()
 trk_parts, play_info = [], {}
 CACHE = os.path.join(OUT, "_tracking_cache.pkl")
@@ -106,7 +105,7 @@ else:
 paths = {k: v.set_index("frameId")[["x", "y"]].sort_index() for k, v in trk.groupby(["gameId", "playId", "nflId"])}
 
 
-# ---------------------------------------------------------------- per-chip physics
+# Estimate contact and measure how the rusher's velocity changes around it.
 def analyze(r):
     g, p = r.gameId, r.playId
     key = (g, p)
@@ -136,13 +135,13 @@ def analyze(r):
     sb, sa = np.linalg.norm(vb), np.linalg.norm(va)
     if sb < MIN_SPEED:
         return {**out, "status": "rusher_not_moving", "speed_before": sb}
-    side = 1.0 if p1[1] >= qp[1] else -1.0          # which side of the QB the rusher is on
-    u = (qp - p1) / max(np.linalg.norm(qp - p1), 1e-6)  # unit vector rusher -> QB
+    side = 1.0 if p1[1] >= qp[1] else -1.0  # Which side of the QB the rusher is on.
+    u = (qp - p1) / max(np.linalg.norm(qp - p1), 1e-6)  # Unit vector toward the QB.
     e_out = np.array([-u[1], u[0]])
     if e_out[1] * side < 0:
-        e_out = -e_out                                    # lateral unit vector pointing away from the QB
-    dlat = (va - vb) @ e_out                             # + = pushed wider
-    dclose = va @ u - vb @ u                             # - = slower toward the QB
+        e_out = -e_out  # Keep the lateral axis pointing toward the outside of the field.
+    dlat = (va - vb) @ e_out  # Positive means the rusher gained outward velocity.
+    dclose = va @ u - vb @ u  # Negative means the rusher slowed toward the QB.
     ang = lambda v: np.degrees(np.arccos(np.clip(v @ u / max(np.linalg.norm(v), 1e-6), -1, 1)))
     cat = "Braked him" if dclose <= -BRAKE_T else "Ran through it" if dclose >= BRAKE_T else "No change"
     direction = "wider" if dlat > 0.3 else "inside" if dlat < -0.3 else "same line"
@@ -160,7 +159,7 @@ chips.to_csv(os.path.join(OUT, "chips.csv"), index=False)
 ok = chips[chips.status == "ok"].copy()
 print(chips.status.value_counts().to_string())
 
-# ---------------------------------------------------------------- summary table
+# Summarize pressure rates and confidence intervals for each chip outcome.
 rows = []
 for cat in CATS:
     s = ok[ok.category == cat]
@@ -171,10 +170,9 @@ for cat in CATS:
 summ = pd.DataFrame(rows)
 summ.to_csv(os.path.join(OUT, "pressure_by_deflection.csv"), index=False)
 
-# ---------------------------------------------------------------- hero figure
+# In the shot chart, up points toward the QB and right points wider.
 figS, ax1 = plt.subplots(figsize=(8, 7.2))
 
-# panel 1: shot chart in the rusher's frame (up = straight at the QB, right = wider / away from QB)
 rng = np.random.default_rng(7)
 samp = ok.sample(min(260, len(ok)), random_state=7)
 for r in samp.itertuples():
@@ -202,7 +200,7 @@ plt.tight_layout()
 figS.savefig(os.path.join(OUT, "shot_chart.png"), dpi=150)
 plt.close(figS)
 
-# hero: (left) what each position's chips do to the rusher, (right) pressure by chip outcome
+# Show chip outcomes by position alongside the pressure rate for each outcome.
 POS_ORDER = ["RB", "FB", "TE", "WR"]
 pos_tab = (ok.groupby("chip_pos").category.value_counts(normalize=True).unstack().reindex(POS_ORDER)[CATS].fillna(0))
 pos_n = ok.chip_pos.value_counts().reindex(POS_ORDER)
@@ -227,7 +225,6 @@ axp.set_xlim(0, 100); axp.set_xlabel("share of chips")
 axp.set_title("What the chip did to the rusher's closing speed toward the QB, by chipper position", fontsize=11)
 axp.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3, frameon=False, fontsize=10)
 
-# panel 2: pressure rate by chip outcome
 y = np.arange(len(summ))[::-1]
 ax2.barh(y, summ.pressure_rate * 100, color=[COLORS[c] for c in summ.category], height=0.6)
 ax2.errorbar(summ.pressure_rate * 100, y, xerr=[(summ.pressure_rate - summ.ci_lo) * 100, (summ.ci_hi - summ.pressure_rate) * 100],
@@ -248,7 +245,7 @@ plt.tight_layout(rect=(0, 0.06, 1, 0.9))
 fig.savefig(os.path.join(OUT, "chip_billiards_hero.png"), dpi=160)
 plt.close(fig)
 
-# ---------------------------------------------------------------- chipper leaderboard
+# Rank chippers with enough measurable contacts to compare.
 MIN_CHIPS = 12
 team = ok.groupby("chipper").possessionTeam.agg(lambda s: s.mode().iat[0])
 lb = (ok.groupby("chipper").agg(chips=("category", "size"),
@@ -278,7 +275,7 @@ plt.tight_layout()
 fig.savefig(os.path.join(OUT, "chipper_leaderboard.png"), dpi=150)
 plt.close(fig)
 
-# ---------------------------------------------------------------- validation: 6 example chips
+# Plot up to two plays per outcome to spot-check the contact estimates.
 fig, axes = plt.subplots(2, 3, figsize=(15, 9))
 ex = pd.concat([ok[ok.category == c].sample(min(2, (ok.category == c).sum()), random_state=3) for c in CATS[:3]])
 for ax, r in zip(axes.flat, ex.itertuples()):
@@ -298,7 +295,7 @@ plt.tight_layout()
 fig.savefig(os.path.join(OUT, "validation_examples.png"), dpi=120)
 plt.close(fig)
 
-# ---------------------------------------------------------------- text summary
+# Save the key numbers alongside the charts and CSVs.
 lines = [f"skill-player chips (CH): {len(chips)}; measurable contact: {len(ok)} ({len(ok) / len(chips):.0%})",
          f"pressure rate - all rushers: {base_all:.1%} | chipped rushers when chipped: {base_same_chipped:.1%} | same rushers when NOT chipped: {base_same_unchipped:.1%}",
          summ.to_string(index=False, float_format=lambda v: f"{v:.3f}"),

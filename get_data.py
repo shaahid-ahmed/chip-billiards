@@ -1,4 +1,4 @@
-"""Download the NYU BDB regional event data (all CSVs) into ./data if missing."""
+"""Download missing event CSVs to BDB_DATA, or ./data if it isn't set."""
 import os, urllib.request, concurrent.futures as cf
 import pandas as pd
 
