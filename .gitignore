@@ -1,0 +1,4 @@
+data/
+outputs/_tracking_cache.pkl
+__pycache__/
+.DS_Store

@@ -1,0 +1,20 @@
+skill-player chips (CH): 1560; measurable contact: 1375 (88%)
+pressure rate - all rushers: 11.6% | chipped rushers when chipped: 10.9% | same rushers when NOT chipped: 12.0%
+      category   n  share  pressures  pressure_rate  ci_lo  ci_hi  mean_dspeed  mean_dlat
+    Braked him 354  0.257         34          0.096  0.070  0.131       -0.573     -0.292
+     No change 569  0.414         52          0.091  0.070  0.118       -0.109     -0.217
+Ran through it 452  0.329         63          0.139  0.110  0.174        0.453     -0.084
+
+top chippers:
+                   player pos team  chips  braked  nochange  ranthrough  dclose  pressure
+chipper                                                                                  
+39212      Brandon Bolden  RB   NE     17    0.82      0.18        0.00   -0.57      0.00
+40138        Rex Burkhead  RB  HOU     18    0.78      0.22        0.00   -0.59      0.06
+46173        Nyheim Hines  RB  IND     15    0.67      0.33        0.00   -0.50      0.20
+44975    Jeremy McNichols  RB  TEN     13    0.62      0.23        0.15   -0.28      0.15
+47857    Devin Singletary  RB  BUF     14    0.57      0.29        0.14   -0.26      0.00
+42429       David Johnson  RB  HOU     12    0.50      0.50        0.00   -0.30      0.08
+43362        Kenyan Drake  RB   LV     16    0.50      0.31        0.19   -0.30      0.06
+46203       Chase Edmonds  RB  ARI     14    0.43      0.43        0.14   -0.15      0.00
+52443       D'Andre Swift  RB  DET     16    0.38      0.56        0.06   -0.14      0.12
+42469          Mike Davis  RB  ATL     20    0.35      0.60        0.05   -0.26      0.05
